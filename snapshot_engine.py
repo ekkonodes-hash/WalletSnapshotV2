@@ -7,6 +7,7 @@ import asyncio
 import uuid
 import os
 import io
+import platform
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,8 +22,9 @@ OUTPUTS    = BASE_DIR / "outputs"
 OUTPUTS.mkdir(exist_ok=True)
 PROFILE.mkdir(exist_ok=True)
 
-# On Railway/server set HEADLESS=true — locally defaults to headed for Cloudflare bypass
-HEADLESS = os.environ.get("HEADLESS", "false").lower() == "true"
+# Force headless on Linux with no display (Railway/Docker), or if HEADLESS=true is set
+_on_linux_no_display = (platform.system() == "Linux" and not os.environ.get("DISPLAY"))
+HEADLESS = _on_linux_no_display or os.environ.get("HEADLESS", "false").lower() == "true"
 
 # ── shared status dict (read by Flask for live polling) ─────────────────────
 status = {
