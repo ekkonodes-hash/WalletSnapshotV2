@@ -1,0 +1,8 @@
+browser_profile/
+outputs/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+*.bat

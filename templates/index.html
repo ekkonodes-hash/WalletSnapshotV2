@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>WalletSnapshot</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+
+/* ── navbar ── */
+.nav{background:#1e293b;border-bottom:1px solid #334155;padding:0 28px;height:56px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
+.nav-logo{font-size:1.2rem;font-weight:700;color:#60a5fa;letter-spacing:.04em}
+.nav-logo span{color:#34d399}
+.nav-sub{font-size:.8rem;color:#64748b;margin-left:4px}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.status-dot{width:9px;height:9px;border-radius:50%;background:#64748b;transition:.4s}
+.status-dot.running{background:#f59e0b;animation:pulse 1s infinite}
+.status-dot.ok{background:#34d399}
+.status-dot.error{background:#f87171}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+#nav-msg{font-size:.82rem;color:#94a3b8;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── layout ── */
+.layout{display:grid;grid-template-columns:1fr 340px;gap:0;height:calc(100vh - 56px)}
+.main{overflow-y:auto;padding:28px}
+.sidebar{background:#1e293b;border-left:1px solid #334155;overflow-y:auto;padding:24px 20px;display:flex;flex-direction:column;gap:20px}
+
+/* ── section cards ── */
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;margin-bottom:22px}
+.card-head{padding:14px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #334155}
+.card-head h2{font-size:.95rem;font-weight:600;color:#f1f5f9}
+.card-head .badge{background:#0f172a;border:1px solid #334155;border-radius:20px;padding:2px 10px;font-size:.72rem;color:#64748b}
+.card-body{padding:18px 20px}
+
+/* ── wallet table ── */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th{background:#0f172a;color:#64748b;font-weight:600;padding:9px 10px;text-align:left;border-bottom:1px solid #334155;white-space:nowrap}
+td{padding:7px 8px;border-bottom:1px solid #1e293b;vertical-align:top}
+tr:hover td{background:#1a2540}
+input[type=text],input[type=url],select{
+  background:#0f172a;border:1px solid #334155;border-radius:6px;
+  color:#e2e8f0;font-size:.8rem;padding:5px 8px;width:100%;
+  outline:none;transition:.2s}
+input:focus,select:focus{border-color:#60a5fa;box-shadow:0 0 0 2px rgba(96,165,250,.15)}
+.chain-sel{min-width:90px}
+
+/* chain color dots */
+.chain-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;flex-shrink:0}
+
+/* explorers sub-table */
+.exp-list{display:flex;flex-direction:column;gap:5px;min-width:340px}
+.exp-row{display:flex;gap:5px;align-items:center}
+.exp-row input[name=exp-name]{width:110px;flex-shrink:0}
+.exp-row input[name=exp-url]{flex:1}
+.btn-icon{background:none;border:none;cursor:pointer;padding:3px 5px;border-radius:4px;color:#64748b;font-size:.85rem;transition:.2s;line-height:1}
+.btn-icon:hover{background:#334155;color:#e2e8f0}
+/* full-page toggle */
+.fp-toggle{display:inline-flex;align-items:center;gap:3px;background:#0f172a;border:1px solid #334155;
+  border-radius:5px;overflow:hidden;flex-shrink:0;font-size:.68rem;cursor:pointer}
+.fp-toggle span{padding:3px 6px;color:#64748b;transition:.15s;white-space:nowrap;user-select:none}
+.fp-toggle span.active{background:#2563eb;color:#fff}
+.fp-toggle span:hover:not(.active){background:#1e3a5f;color:#93c5fd}
+
+/* ── buttons ── */
+.btn{display:inline-flex;align-items:center;gap:7px;border:none;border-radius:8px;
+     padding:8px 16px;font-size:.85rem;font-weight:600;cursor:pointer;transition:.2s}
+.btn-primary{background:#2563eb;color:#fff}
+.btn-primary:hover{background:#1d4ed8}
+.btn-success{background:#059669;color:#fff}
+.btn-success:hover{background:#047857}
+.btn-warn{background:#d97706;color:#fff}
+.btn-warn:hover{background:#b45309}
+.btn-ghost{background:#334155;color:#cbd5e1}
+.btn-ghost:hover{background:#475569}
+.btn-danger{background:#dc2626;color:#fff}
+.btn-danger:hover{background:#b91c1c}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-sm{padding:5px 11px;font-size:.78rem}
+
+.add-row-btn{margin-top:10px}
+
+/* ── schedule panel ── */
+.sched-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.field-label{font-size:.75rem;color:#64748b;margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+input[type=time]{background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:.9rem;padding:7px 10px;outline:none;width:100%}
+input[type=time]:focus{border-color:#60a5fa}
+.sched-next{font-size:.8rem;color:#34d399;margin-top:8px;min-height:18px}
+.sched-next.none{color:#64748b}
+
+/* ── status panel ── */
+.status-box{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:14px 16px}
+.status-msg{font-size:.85rem;color:#94a3b8;margin-bottom:8px;min-height:20px}
+.progress-bar-wrap{background:#1e293b;border-radius:4px;height:6px;overflow:hidden;display:none}
+.progress-bar{height:6px;background:#2563eb;width:0%;transition:width .4s;border-radius:4px}
+
+/* ── history ── */
+.hist-list{display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto}
+.hist-item{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;
+           display:flex;align-items:center;gap:10px}
+.hist-item .hi-ts{font-size:.78rem;color:#64748b;flex:1}
+.hist-item .hi-file{font-size:.8rem;color:#60a5fa;text-decoration:none;max-width:160px;
+                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist-item .hi-file:hover{text-decoration:underline}
+.hist-item .hi-pages{font-size:.72rem;color:#475569}
+.empty-msg{color:#475569;font-size:.82rem;font-style:italic;padding:8px 0}
+
+/* ── file list ── */
+.file-list{display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto}
+.file-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#0f172a;
+           border:1px solid #334155;border-radius:8px}
+.file-item .fi-name{flex:1;font-size:.8rem;color:#60a5fa;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-item .fi-name:hover{text-decoration:underline}
+.file-item .fi-meta{font-size:.72rem;color:#475569;white-space:nowrap}
+.file-item .fi-del{background:none;border:none;color:#475569;cursor:pointer;font-size:1.1rem;line-height:1;padding:0 4px;border-radius:4px;transition:.15s;flex-shrink:0}
+.file-item .fi-del:hover{color:#f87171;background:#f8717122}
+
+/* ── token highlight ── */
+.token-pill{display:inline-block;background:#1e3a5f;color:#93c5fd;border:1px solid #2563eb44;
+            border-radius:4px;padding:1px 7px;font-size:.72rem;font-weight:600}
+
+/* ── toast ── */
+#toast{position:fixed;bottom:24px;right:24px;background:#1e293b;border:1px solid #334155;
+       border-radius:10px;padding:12px 20px;font-size:.85rem;color:#e2e8f0;
+       transform:translateY(80px);opacity:0;transition:.3s;z-index:999;max-width:320px}
+#toast.show{transform:translateY(0);opacity:1}
+#toast.err{border-color:#dc2626;color:#fca5a5}
+#toast.ok{border-color:#059669;color:#6ee7b7}
+
+/* scrollbar */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:#0f172a}
+::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+</style>
+</head>
+<body>
+
+<!-- ── navbar ── -->
+<nav class="nav">
+  <span class="nav-logo">Wallet<span>Snapshot</span></span>
+  <span class="nav-sub">· parallel blockchain explorer capture</span>
+  <div class="nav-right">
+    <span class="status-dot" id="sdot"></span>
+    <span id="nav-msg">Idle</span>
+  </div>
+</nav>
+
+<div class="layout">
+
+  <!-- ══════════════ MAIN COLUMN ══════════════ -->
+  <div class="main">
+
+    <!-- Wallet Configuration -->
+    <div class="card">
+      <div class="card-head">
+        <h2>💼 Wallet Configuration</h2>
+        <span class="badge" id="wallet-count">0 wallets</span>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="importJSON()">⬆ Import JSON</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportJSON()">⬇ Export JSON</button>
+          <button class="btn btn-success btn-sm" onclick="saveWallets()">💾 Save</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="tbl-wrap">
+          <table id="wallet-table">
+            <thead>
+              <tr>
+                <th style="width:100px">Chain</th>
+                <th style="min-width:280px">Wallet Address</th>
+                <th style="min-width:90px">Token</th>
+                <th style="min-width:380px">Explorer URLs  <span style="color:#475569;font-weight:400;font-size:.72rem">(use {address} as placeholder)</span></th>
+                <th style="width:40px"></th>
+              </tr>
+            </thead>
+            <tbody id="wallet-body"></tbody>
+          </table>
+        </div>
+        <button class="btn btn-ghost btn-sm add-row-btn" onclick="addRow()">＋ Add Wallet</button>
+      </div>
+    </div>
+
+    <!-- Run History -->
+    <div class="card">
+      <div class="card-head">
+        <h2>📋 Run History</h2>
+        <div style="margin-left:auto">
+          <button class="btn btn-ghost btn-sm" onclick="loadFiles()">⟳ Refresh</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="hist-list" id="hist-list">
+          <p class="empty-msg">No runs yet.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Saved Files -->
+    <div class="card">
+      <div class="card-head">
+        <h2>📁 Saved Reports</h2>
+        <button class="btn btn-ghost btn-sm" onclick="clearAllFiles()"
+                style="margin-left:auto;color:#f87171;border-color:#f8717144;font-size:.75rem;padding:4px 10px"
+                title="Delete all saved reports">
+          🗑 Clear All
+        </button>
+      </div>
+      <div class="card-body">
+        <div class="file-list" id="file-list">
+          <p class="empty-msg">No files yet.</p>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+
+  <!-- ══════════════ SIDEBAR ══════════════ -->
+  <div class="sidebar">
+
+    <!-- Run Now -->
+    <div>
+      <div class="field-label">Manual Snapshot</div>
+      <button class="btn btn-primary" id="run-btn" onclick="runNow()" style="width:100%;justify-content:center;padding:12px">
+        ▶ &nbsp;Run Now
+      </button>
+      <div style="font-size:.75rem;color:#475569;margin-top:6px;text-align:center">
+        Loads all pages in parallel &amp; captures screenshots instantly
+      </div>
+    </div>
+
+    <hr style="border-color:#334155">
+
+    <!-- Schedule -->
+    <div>
+      <div class="field-label" style="margin-bottom:12px">⏰ Scheduled Run (UTC)</div>
+      <div class="sched-grid">
+        <div>
+          <div class="field-label">Time (UTC)</div>
+          <input type="time" id="sched-time" value="00:00">
+        </div>
+        <div>
+          <div class="field-label">Frequency</div>
+          <select id="sched-days" style="width:100%;padding:7px 8px">
+            <option value="daily">Daily</option>
+            <option value="mon-fri">Mon – Fri</option>
+            <option value="weekends">Weekends</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn btn-warn btn-sm" onclick="setSchedule(true)" style="flex:1;justify-content:center">
+          ✓ Enable Schedule
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="setSchedule(false)">✕ Off</button>
+      </div>
+      <div class="sched-next none" id="sched-next">Not scheduled</div>
+    </div>
+
+    <hr style="border-color:#334155">
+
+    <!-- Page Load Wait -->
+    <div>
+      <div class="field-label" style="margin-bottom:8px">⏳ Page Load Buffer</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="number" id="wait-secs" min="3" max="120" value="12"
+               style="width:70px;padding:6px 8px;text-align:center">
+        <span style="font-size:.8rem;color:#64748b">seconds to wait after page loads</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-ghost btn-sm" onclick="saveWaitSecs()" style="flex:1;justify-content:center">
+          💾 Save
+        </button>
+      </div>
+      <div style="font-size:.73rem;color:#475569;margin-top:6px;line-height:1.5">
+        Increase if pages (e.g. suivision, oklink) don't finish loading before the screenshot is taken. 12s is a safe default.
+      </div>
+    </div>
+
+    <!-- Max height -->
+    <div>
+      <div class="field-label" style="margin-bottom:8px">✂️ Full-Page Max Height</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="number" id="max-height" min="0" max="20000" value="3000"
+               style="width:70px;padding:6px 8px;text-align:center">
+        <span style="font-size:.8rem;color:#64748b">px &nbsp;(0 = no limit)</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-ghost btn-sm" onclick="saveMaxHeight()" style="flex:1;justify-content:center">
+          💾 Save
+        </button>
+      </div>
+      <div style="font-size:.73rem;color:#475569;margin-top:6px;line-height:1.5">
+        Crops full-page screenshots at this height to cut off footers. 3000px works for most explorers.
+      </div>
+    </div>
+
+    <hr style="border-color:#334155">
+
+    <!-- Live Status -->
+    <div>
+      <div class="field-label" style="margin-bottom:10px">📡 Live Status</div>
+      <div class="status-box">
+        <div class="status-msg" id="status-msg">Idle — ready to run.</div>
+        <div class="progress-bar-wrap" id="prog-wrap">
+          <div class="progress-bar" id="prog-bar"></div>
+        </div>
+      </div>
+    </div>
+
+    <hr style="border-color:#334155">
+
+    <!-- Tips -->
+    <div>
+      <div class="field-label" style="margin-bottom:8px">💡 Tips</div>
+      <div style="font-size:.76rem;color:#475569;line-height:1.7">
+        <p>• Use <code style="color:#93c5fd">{address}</code> in URLs — it gets replaced automatically.</p>
+        <p style="margin-top:6px">• For Cloudflare-protected sites (e.g. suivision.xyz), the browser will open visibly — pass the check once and it remembers.</p>
+        <p style="margin-top:6px">• Schedule uses <strong>UTC time</strong>. Midnight UTC = 00:00.</p>
+        <p style="margin-top:6px">• Add as many chains, wallets, and explorers as you need — they all load in parallel.</p>
+      </div>
+    </div>
+
+  </div><!-- /sidebar -->
+</div><!-- /layout -->
+
+<div id="toast"></div>
+
+<script>
+// ── chain colors ──────────────────────────────────────────────────────────────
+const CC={
+  TON:"#0098EA", SUI:"#4DA2FF",  TRON:"#E53935",  ETH:"#627EEA",
+  SOL:"#9945FF", BTC:"#F7931A",  BNB:"#F3BA2F",   ALGO:"#00BCD4",
+  SEI:"#9C27B0", STELLAR:"#7986CB", XDC:"#1976D2", BERACHAIN:"#F4811F"
+};
+const CHAINS=["ALGO","BERACHAIN","BNB","BTC","ETH","SEI","SOL","STELLAR","SUI","TON","TRON","XDC","OTHER"];
+
+// ── wallet rows ───────────────────────────────────────────────────────────────
+let wallets=[];
+
+function addRow(w){
+  w=w||{chain:"TON",address:"",token:"USDC",explorers:[{name:"",url:""}]};
+  const tbody=document.getElementById("wallet-body");
+  const id="w"+Date.now()+Math.random().toString(36).slice(2,6);
+  const tr=document.createElement("tr");
+  tr.dataset.id=id;
+  tr.innerHTML=`
+    <td>
+      <select class="chain-sel" data-field="chain" onchange="chainChanged(this)">
+        ${CHAINS.map(c=>`<option ${c===w.chain?"selected":""}>${c}</option>`).join("")}
+      </select>
+    </td>
+    <td><input type="text" data-field="address" value="${esc(w.address)}"
+         placeholder="Full wallet address…" style="min-width:260px"></td>
+    <td><input type="text" data-field="token" value="${esc(w.token)}"
+         placeholder="USDC" style="max-width:80px"></td>
+    <td>
+      <div class="exp-list" data-exps>
+        ${(w.explorers||[{name:"",url:""}]).map(e=>expRow(e)).join("")}
+      </div>
+      <button class="btn-icon" style="margin-top:6px;font-size:.78rem;color:#60a5fa"
+              onclick="addExp(this)">＋ explorer</button>
+    </td>
+    <td><button class="btn-icon" onclick="delRow(this)" title="Delete">🗑</button></td>`;
+  tbody.appendChild(tr);
+  updateCount();
+}
+
+function expRow(e){
+  const full = e.full_page !== false; // default true
+  return `<div class="exp-row">
+    <input type="text" name="exp-name" value="${esc(e.name||"")}" placeholder="Name">
+    <input type="url"  name="exp-url"  value="${esc(e.url||"")}"
+           placeholder="https://…/{address}…" style="font-size:.76rem">
+    <div class="fp-toggle" title="Screenshot mode">
+      <span class="${full?"":"active"}" onclick="fpToggle(this,'viewport')">Viewport</span>
+      <span class="${full?"active":""}" onclick="fpToggle(this,'full')">Full</span>
+    </div>
+    <button class="btn-icon" onclick="delExp(this)" title="Remove">✕</button>
+  </div>`;
+}
+function fpToggle(span, mode){
+  const tog=span.closest(".fp-toggle");
+  tog.querySelectorAll("span").forEach(s=>s.classList.remove("active"));
+  span.classList.add("active");
+}
+
+function addExp(btn){
+  const list=btn.previousElementSibling;
+  list.insertAdjacentHTML("beforeend",expRow({name:"",url:""}));
+}
+function delExp(btn){ btn.closest(".exp-row").remove(); }
+function delRow(btn){ btn.closest("tr").remove(); updateCount(); }
+function chainChanged(sel){
+  const dot=sel.closest("tr").querySelector(".chain-dot");
+  if(dot) dot.style.background=CC[sel.value]||"#6C63FF";
+}
+function esc(s){ return String(s||"").replace(/"/g,"&quot;"); }
+
+function updateCount(){
+  const n=document.getElementById("wallet-body").querySelectorAll("tr").length;
+  document.getElementById("wallet-count").textContent=`${n} wallet${n!==1?"s":""}`;
+}
+
+// ── gather current rows into array ────────────────────────────────────────────
+function gatherWallets(){
+  return [...document.querySelectorAll("#wallet-body tr")].map(tr=>({
+    chain  : tr.querySelector("[data-field=chain]")?.value||"",
+    address: tr.querySelector("[data-field=address]")?.value.trim()||"",
+    token  : tr.querySelector("[data-field=token]")?.value.trim()||"",
+    explorers: [...tr.querySelectorAll("[data-exps] .exp-row")].map(r=>({
+      name     : r.querySelector("[name=exp-name]")?.value.trim()||"",
+      url      : r.querySelector("[name=exp-url]")?.value.trim()||"",
+      full_page: r.querySelector(".fp-toggle .active")?.textContent.trim()==="Full",
+    })).filter(e=>e.url),
+  })).filter(w=>w.address);
+}
+
+// ── API calls ─────────────────────────────────────────────────────────────────
+async function saveWallets(){
+  const data=gatherWallets();
+  const r=await fetch("/api/wallets",{method:"POST",headers:{"Content-Type":"application/json"},
+                                      body:JSON.stringify(data)});
+  toast("Wallets saved ✓","ok");
+}
+
+async function loadWallets(){
+  const r=await fetch("/api/wallets");
+  const data=await r.json();
+  document.getElementById("wallet-body").innerHTML="";
+  if(!data.length){ addRow(); return; }
+  data.forEach(addRow);
+  updateCount();
+}
+
+async function runNow(){
+  await saveWallets();
+  const r=await fetch("/api/run",{method:"POST"});
+  if(r.status===409){ toast("Already running — please wait.","err"); return; }
+  toast("Snapshot started ▶","ok");
+  document.getElementById("run-btn").disabled=true;
+}
+
+async function setSchedule(enable){
+  const time=document.getElementById("sched-time").value;
+  const days=document.getElementById("sched-days").value;
+  const r=await fetch("/api/schedule",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({enabled:enable,time,days})});
+  const d=await r.json();
+  const el=document.getElementById("sched-next");
+  if(d.next){ el.textContent="Next run: "+d.next; el.className="sched-next"; toast("Schedule set ✓","ok"); }
+  else       { el.textContent="Not scheduled";    el.className="sched-next none"; toast("Schedule disabled",""); }
+}
+
+async function saveWaitSecs(){
+  const v=parseInt(document.getElementById("wait-secs").value)||12;
+  await fetch("/api/settings",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({wait_secs:v})});
+  toast(`Wait time saved: ${v}s ✓`,"ok");
+}
+
+async function saveMaxHeight(){
+  const v=parseInt(document.getElementById("max-height").value)||0;
+  await fetch("/api/settings",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({max_height:v})});
+  toast(v===0 ? "Max height: no limit ✓" : `Max height saved: ${v}px ✓`,"ok");
+}
+
+async function loadSettings(){
+  const r=await fetch("/api/settings");
+  const d=await r.json();
+  if(d.wait_secs)  document.getElementById("wait-secs").value=d.wait_secs;
+  if(d.max_height !== undefined) document.getElementById("max-height").value=d.max_height;
+}
+
+async function loadSchedule(){
+  const r=await fetch("/api/schedule");
+  const d=await r.json();
+  const el=document.getElementById("sched-next");
+  if(d.enabled&&d.next){ el.textContent="Next run: "+d.next; el.className="sched-next"; }
+  else                  { el.textContent="Not scheduled";    el.className="sched-next none"; }
+}
+
+async function loadFiles(){
+  const r=await fetch("/api/files"); const files=await r.json();
+  const el=document.getElementById("file-list");
+  if(!files.length){ el.innerHTML='<p class="empty-msg">No files yet.</p>'; return; }
+  el.innerHTML=files.map(f=>`
+    <div class="file-item" id="fi-${CSS.escape(f.name)}">
+      <a class="fi-name" href="/api/download/${encodeURIComponent(f.name)}" download title="${f.name}">
+        📊 ${f.name}
+      </a>
+      <span class="fi-meta">${f.size} · ${f.date}</span>
+      <button class="fi-del" onclick="deleteFile('${f.name.replace(/'/g,"\\'")}')" title="Delete this report">×</button>
+    </div>`).join("");
+}
+
+async function deleteFile(name){
+  if(!confirm(`Delete "${name}"?`)) return;
+  await fetch("/api/delete/"+encodeURIComponent(name),{method:"DELETE"});
+  toast("Deleted ✓","ok");
+  loadFiles();
+}
+
+async function clearAllFiles(){
+  if(!confirm("Delete ALL saved reports? This cannot be undone.")) return;
+  const r=await fetch("/api/delete-all",{method:"DELETE"});
+  const d=await r.json();
+  toast(`Cleared ${d.removed} file(s) ✓`,"ok");
+  loadFiles();
+}
+
+// ── live status polling ────────────────────────────────────────────────────────
+let prevRunning=false;
+async function pollStatus(){
+  try{
+    const r=await fetch("/api/status"); const s=await r.json();
+    const dot=document.getElementById("sdot");
+    const msg=document.getElementById("status-msg");
+    const navMsg=document.getElementById("nav-msg");
+    const runBtn=document.getElementById("run-btn");
+
+    msg.textContent=s.message||"Idle";
+    navMsg.textContent=s.message||"Idle";
+
+    if(s.running){
+      dot.className="status-dot running";
+      runBtn.disabled=true;
+    } else if(s.error){
+      dot.className="status-dot error";
+      runBtn.disabled=false;
+    } else {
+      dot.className="status-dot"+(s.last_run?" ok":"");
+      runBtn.disabled=false;
+    }
+
+    // update history when run completes
+    if(prevRunning&&!s.running){
+      updateHistory(s.history||[]);
+      loadFiles();
+    }
+    prevRunning=s.running;
+  } catch(e){}
+}
+
+function updateHistory(hist){
+  const el=document.getElementById("hist-list");
+  if(!hist.length){ el.innerHTML='<p class="empty-msg">No runs yet.</p>'; return; }
+  el.innerHTML=hist.map(h=>`
+    <div class="hist-item">
+      <span class="hi-ts">🕐 ${h.ts}</span>
+      <span class="hi-pages">${h.pages} pages</span>
+      <a class="hi-file" href="/api/download/${encodeURIComponent(h.file)}" download>
+        📊 ${h.file}
+      </a>
+    </div>`).join("");
+}
+
+// ── import / export ───────────────────────────────────────────────────────────
+function exportJSON(){
+  const data=gatherWallets();
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="wallets.json"; a.click();
+}
+
+function importJSON(){
+  const inp=document.createElement("input"); inp.type="file"; inp.accept=".json";
+  inp.onchange=async e=>{
+    const text=await e.target.files[0].text();
+    const data=JSON.parse(text);
+    document.getElementById("wallet-body").innerHTML="";
+    data.forEach(addRow); updateCount();
+    toast("Imported "+data.length+" wallet(s)","ok");
+  };
+  inp.click();
+}
+
+// ── toast ─────────────────────────────────────────────────────────────────────
+function toast(msg,type=""){
+  const el=document.getElementById("toast");
+  el.textContent=msg; el.className="show"+(type?" "+type:"");
+  setTimeout(()=>el.className="",3000);
+}
+
+// ── init ──────────────────────────────────────────────────────────────────────
+loadWallets();
+loadSchedule();
+loadSettings();
+loadFiles();
+setInterval(pollStatus,2000);
+pollStatus();
+</script>
+</body>
+</html>
