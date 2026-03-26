@@ -147,7 +147,7 @@ def _stamp_bar(screenshot_bytes, chain, token, explorer_name, url, timestamp):
 
 # ── async capture ─────────────────────────────────────────────────────────────
 async def _capture(wallets, cb, wait_secs=12, max_height=3000):
-    """Open every explorer URL in parallel, wait, screenshot all at once."""
+    """Open explorer URLs in batches to stay within Railway's memory limits."""
     from playwright.async_api import async_playwright
 
     # playwright-stealth patches navigator.webdriver, plugins, languages,
@@ -158,6 +158,12 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
         _stealth_available = True
     except ImportError:
         _stealth_available = False
+
+    # BATCH_SIZE controls how many pages are open simultaneously.
+    # Each full-page screenshot uses ~150-200 MB of RAM. Railway containers
+    # have limited memory, so we process pages in small batches to avoid
+    # "Target crashed" OOM errors. Set BATCH_SIZE env var to override.
+    BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "4"))
 
     tasks = []
     for w in wallets:
@@ -170,8 +176,11 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
     if not tasks:
         return []
 
-    cb(f"Opening {len(tasks)} pages simultaneously…")
+    total   = len(tasks)
+    batches = [tasks[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
+    cb(f"{total} pages to capture in {len(batches)} batch(es) of {BATCH_SIZE}…")
     results = []
+    ts      = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     async with async_playwright() as p:
         # Build proxy config if env var is set
@@ -196,6 +205,7 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
                 "--disable-dev-shm-usage",       # prevents crashes in Docker
                 "--disable-background-timer-throttling",
                 "--disable-renderer-backgrounding",
+                "--js-flags=--max-old-space-size=512",  # cap V8 heap per tab
             ],
             # Pass typical browser headers so requests look organic
             extra_http_headers={
@@ -204,74 +214,80 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
             },
         )
 
-        # open one page per task and apply stealth patches before any navigation
-        pages = []
-        for t in tasks:
-            pg = await ctx.new_page()
-            if _stealth_available:
-                await stealth_async(pg)
-            pages.append((pg, t))
+        for batch_num, batch in enumerate(batches, 1):
+            cb(f"Batch {batch_num}/{len(batches)}: loading {len(batch)} page(s)…")
 
-        # navigate ALL simultaneously
-        cb("Navigating all pages in parallel…")
-        await asyncio.gather(
-            *[pg.goto(t["url"], wait_until="domcontentloaded", timeout=30000)
-              for pg, t in pages],
-            return_exceptions=True,
-        )
+            # Open pages for this batch and apply stealth before navigation
+            pages = []
+            for t in batch:
+                pg = await ctx.new_page()
+                if _stealth_available:
+                    await stealth_async(pg)
+                pages.append((pg, t))
 
-        cb(f"Waiting {wait_secs}s for dynamic content to render…")
-        await asyncio.sleep(wait_secs)
+            # Navigate all pages in the batch simultaneously
+            await asyncio.gather(
+                *[pg.goto(t["url"], wait_until="domcontentloaded", timeout=45000)
+                  for pg, t in pages],
+                return_exceptions=True,
+            )
 
-        # for viewport screenshots, scroll to top so the address header is visible
-        cb("Preparing pages for capture…")
-        async def _scroll_top(pg, full_page):
-            try:
-                if not full_page:
-                    await pg.evaluate("window.scrollTo(0, 0);")
-                    await asyncio.sleep(0.3)
-            except Exception:
-                pass
+            # Wait for dynamic content (JS-heavy explorers need this)
+            cb(f"Batch {batch_num}/{len(batches)}: waiting {wait_secs}s for content…")
+            await asyncio.sleep(wait_secs)
 
-        await asyncio.gather(
-            *[_scroll_top(pg, t["explorer"].get("full_page", True))
-              for pg, t in pages],
-            return_exceptions=True,
-        )
+            # Scroll to top for viewport screenshots
+            for pg, t in pages:
+                try:
+                    if not t["explorer"].get("full_page", True):
+                        await pg.evaluate("window.scrollTo(0, 0);")
+                        await asyncio.sleep(0.3)
+                except Exception:
+                    pass
 
-        cb("Taking screenshots…")
-        ts  = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        sss = await asyncio.gather(
-            *[pg.screenshot(full_page=t["explorer"].get("full_page", True))
-              for pg, t in pages],
-            return_exceptions=True,
-        )
+            # Take screenshots one at a time — sequential avoids the memory
+            # spike that causes "Target crashed" when all render simultaneously
+            cb(f"Batch {batch_num}/{len(batches)}: taking screenshots…")
+            for pg, t in pages:
+                try:
+                    ss = await pg.screenshot(
+                        full_page=t["explorer"].get("full_page", True),
+                        timeout=60000,   # 60s — heavy explorers need this
+                    )
+                    if t["explorer"].get("full_page", True) and max_height:
+                        ss = _crop_height(ss, max_height)
+                    stamped = _stamp_bar(
+                        ss,
+                        chain         = t["wallet"].get("chain", ""),
+                        token         = t["wallet"].get("token", ""),
+                        explorer_name = t["explorer"].get("name", ""),
+                        url           = t["url"],
+                        timestamp     = ts,
+                    )
+                    results.append({
+                        "wallet"    : t["wallet"],
+                        "explorer"  : t["explorer"],
+                        "url"       : t["url"],
+                        "timestamp" : ts,
+                        "screenshot": stamped,
+                        "error"     : None,
+                    })
+                except Exception as e:
+                    results.append({
+                        "wallet"    : t["wallet"],
+                        "explorer"  : t["explorer"],
+                        "url"       : t["url"],
+                        "timestamp" : ts,
+                        "screenshot": None,
+                        "error"     : str(e),
+                    })
 
-        for (pg, t), ss in zip(pages, sss):
-            if isinstance(ss, Exception):
-                stamped = None
-                err = str(ss)
-            else:
-                # crop full-page screenshots to avoid capturing endless footers
-                if t["explorer"].get("full_page", True) and max_height:
-                    ss = _crop_height(ss, max_height)
-                stamped = _stamp_bar(
-                    ss,
-                    chain        = t["wallet"].get("chain", ""),
-                    token        = t["wallet"].get("token", ""),
-                    explorer_name= t["explorer"].get("name", ""),
-                    url          = t["url"],
-                    timestamp    = ts,
-                )
-                err = None
-            results.append({
-                "wallet"    : t["wallet"],
-                "explorer"  : t["explorer"],
-                "url"       : t["url"],
-                "timestamp" : ts,
-                "screenshot": stamped,
-                "error"     : err,
-            })
+            # Close batch pages to free memory before the next batch
+            for pg, _ in pages:
+                try:
+                    await pg.close()
+                except Exception:
+                    pass
 
         await ctx.close()
 
