@@ -242,6 +242,20 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
     if not tasks:
         return []
 
+    # ── Clean up stale Chrome lock files ─────────────────────────────────────
+    # If a previous run crashed (OOM, timeout, etc.), Chrome leaves lock files
+    # in the profile directory.  On the next run Chrome sees the lock, assumes
+    # another instance is already running, and immediately closes the context →
+    # "BrowserContext.new_page: Target page, context or browser has been closed"
+    for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket",
+                      "lockfile", ".com.google.Chrome.T6xMpR"):
+        lock_path = PROFILE / lock_name
+        try:
+            if lock_path.exists():
+                lock_path.unlink()
+        except Exception:
+            pass
+
     total   = len(tasks)
     batches = [tasks[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
     cb(f"{total} pages to capture in {len(batches)} batch(es) of {BATCH_SIZE}…")
