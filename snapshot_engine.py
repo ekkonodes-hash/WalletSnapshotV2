@@ -145,6 +145,72 @@ def _stamp_bar(screenshot_bytes, chain, token, explorer_name, url, timestamp):
     except Exception:
         return screenshot_bytes   # if anything fails, return original untouched
 
+
+def _stamp_blocked_bar(screenshot_bytes, reason):
+    """Overlay a bright red warning banner at the top of a blocked screenshot."""
+    try:
+        img   = PILImage.open(io.BytesIO(screenshot_bytes)).convert("RGB")
+        bar_h = 48
+        out   = PILImage.new("RGB", (img.width, img.height + bar_h), (180, 0, 0))
+        out.paste(img, (0, bar_h))
+        draw  = ImageDraw.Draw(out)
+        draw.rectangle([0, 0, img.width, bar_h], fill=(180, 0, 0))
+
+        font_paths = [
+            "C:/Windows/Fonts/arialbd.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        ]
+        font = None
+        for fp in font_paths:
+            try:
+                font = ImageFont.truetype(fp, 15)
+                break
+            except Exception:
+                pass
+        if font is None:
+            font = ImageFont.load_default()
+
+        msg = f"⚠  BLOCKED — {reason}"
+        draw.text((12, (bar_h - 16) // 2), msg, fill=(255, 255, 180), font=font)
+
+        buf = io.BytesIO()
+        out.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return screenshot_bytes
+
+
+# ── bot/challenge page detection ─────────────────────────────────────────────
+# Page titles / body patterns that indicate a block or challenge page.
+_BLOCK_TITLES = [
+    "just a moment",          # Cloudflare standard JS challenge
+    "performing security verification",  # Cloudflare under-attack
+    "attention required",     # Cloudflare captcha
+    "access blocked",         # Routescan / generic
+    "access denied",
+    "403 forbidden",
+    "ddos-guard",
+    "enable javascript",
+    "checking your browser",
+    "please wait",
+    "bot protection",
+    "human verification",
+]
+
+async def _check_blocked(page) -> str | None:
+    """Return a short description if the page looks like a bot block, else None."""
+    try:
+        title = (await page.title()).lower()
+        for pat in _BLOCK_TITLES:
+            if pat in title:
+                return f"Bot challenge / block detected: \"{await page.title()}\""
+    except Exception:
+        pass
+    return None
+
+
 # ── async capture ─────────────────────────────────────────────────────────────
 async def _capture(wallets, cb, wait_secs=12, max_height=3000):
     """Open explorer URLs in batches to stay within Railway's memory limits."""
@@ -250,12 +316,27 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
             cb(f"Batch {batch_num}/{len(batches)}: taking screenshots…")
             for pg, t in pages:
                 try:
+                    # ── Bot challenge detection & retry ───────────────────
+                    block_reason = await _check_blocked(pg)
+                    if block_reason:
+                        # Cloudflare JS challenges can pass with extra wait.
+                        # Give it 20 more seconds then check again.
+                        cb(f"Challenge detected on {t['explorer'].get('name','')} — waiting 20s for JS challenge…")
+                        await asyncio.sleep(20)
+                        block_reason = await _check_blocked(pg)
+
                     ss = await pg.screenshot(
                         full_page=t["explorer"].get("full_page", True),
                         timeout=60000,   # 60s — heavy explorers need this
                     )
                     if t["explorer"].get("full_page", True) and max_height:
                         ss = _crop_height(ss, max_height)
+
+                    # If still blocked after retry, stamp a red warning bar
+                    # so it's unmistakably visible in the Excel report
+                    if block_reason:
+                        ss = _stamp_blocked_bar(ss, block_reason)
+
                     stamped = _stamp_bar(
                         ss,
                         chain         = t["wallet"].get("chain", ""),
@@ -270,7 +351,9 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
                         "url"       : t["url"],
                         "timestamp" : ts,
                         "screenshot": stamped,
-                        "error"     : None,
+                        # Surface the block reason as a soft error so the
+                        # Summary tab shows ✗ and the reason is visible
+                        "error"     : block_reason,
                     })
                 except Exception as e:
                     results.append({
@@ -344,7 +427,7 @@ def _build_excel(results, ts_str):
         bg    = LGRAY if ri % 2 == 0 else WHITE
         ws.cell(row=ri, column=1).fill   = _fill(cc)
         ws.cell(row=ri, column=1).border = _border()
-        ok = "✓" if r["screenshot"] else "✗"
+        ok = "✓" if (r["screenshot"] and not r.get("error")) else "✗"
         for ci, v in enumerate([chain,
                                  r["explorer"].get("name",""),
                                  r["wallet"].get("address",""),
