@@ -20,8 +20,10 @@ COPY . .
 # Locally this directory is unused (DATA_DIR defaults to the repo root).
 RUN mkdir -p /data /data/outputs /data/browser_profile outputs browser_profile
 
-EXPOSE 5000
+# Railway injects $PORT at runtime (usually 8080). We must bind to it.
+# Locally $PORT is unset so we fall back to 5000 — no behaviour change.
+EXPOSE 8080
 
 # Use gunicorn for production.  --workers 1 keeps a single process so the
 # in-memory scheduler and status dict are shared across all requests.
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "300", "app:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --workers 1 --threads 4 --timeout 300 app:app"]
