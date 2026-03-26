@@ -339,17 +339,36 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
                         await asyncio.sleep(20)
                         block_reason = await _check_blocked(pg)
 
-                    ss = await pg.screenshot(
-                        full_page=t["explorer"].get("full_page", True),
-                        timeout=60000,   # 60s — heavy explorers need this
-                    )
-                    if t["explorer"].get("full_page", True) and max_height:
+                    # ── Screenshot with viewport fallback ─────────────────
+                    # Heavy pages (Tronscan, Seitrace) can crash the renderer
+                    # during a full-page screenshot due to memory pressure.
+                    # If that happens, immediately retry as a viewport-only
+                    # capture — partial screenshot is always better than none.
+                    want_full = t["explorer"].get("full_page", True)
+                    viewport_fallback = False
+                    try:
+                        ss = await pg.screenshot(
+                            full_page=want_full,
+                            timeout=60000,
+                        )
+                    except Exception as ss_err:
+                        err_str = str(ss_err).lower()
+                        if want_full and ("crashed" in err_str or "closed" in err_str or "target" in err_str):
+                            cb(f"Full-page crash on {t['explorer'].get('name','')} — retrying as viewport…")
+                            await asyncio.sleep(2)
+                            ss = await pg.screenshot(full_page=False, timeout=30000)
+                            viewport_fallback = True
+                        else:
+                            raise
+
+                    if want_full and not viewport_fallback and max_height:
                         ss = _crop_height(ss, max_height)
 
-                    # If still blocked after retry, stamp a red warning bar
-                    # so it's unmistakably visible in the Excel report
+                    # Stamp a red bar if bot-blocked, orange if viewport fallback
                     if block_reason:
                         ss = _stamp_blocked_bar(ss, block_reason)
+                    elif viewport_fallback:
+                        ss = _stamp_blocked_bar(ss, "Viewport only — full-page crashed (memory); balance visible above fold")
 
                     stamped = _stamp_bar(
                         ss,
@@ -359,15 +378,15 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
                         url           = t["url"],
                         timestamp     = ts,
                     )
+                    # viewport fallback = partial success: keep screenshot but mark ✗
+                    soft_error = block_reason or ("Viewport-only fallback (full-page OOM)" if viewport_fallback else None)
                     results.append({
                         "wallet"    : t["wallet"],
                         "explorer"  : t["explorer"],
                         "url"       : t["url"],
                         "timestamp" : ts,
                         "screenshot": stamped,
-                        # Surface the block reason as a soft error so the
-                        # Summary tab shows ✗ and the reason is visible
-                        "error"     : block_reason,
+                        "error"     : soft_error,
                     })
                 except Exception as e:
                     results.append({
