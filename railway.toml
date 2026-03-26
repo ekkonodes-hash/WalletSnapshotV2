@@ -5,3 +5,17 @@ dockerfilePath = "Dockerfile"
 healthcheckPath = "/"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
+
+# ── Environment variables to set in Railway dashboard ────────────────────────
+#
+# REQUIRED for persistence:
+#   DATA_DIR=/data
+#   (then attach a Railway Volume mounted at /data)
+#
+# OPTIONAL — Cloudflare bypass via residential proxy:
+#   PROXY_URL=http://user:pass@proxy-host:port
+#   (or socks5://user:pass@proxy-host:port)
+#   Recommended providers: Bright Data, Smartproxy, Oxylabs
+#
+# OPTIONAL — Force headless (auto-detected on Linux, so usually not needed):
+#   HEADLESS=true

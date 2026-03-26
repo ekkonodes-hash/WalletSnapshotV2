@@ -16,15 +16,31 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.drawing.image import Image as XLImage
 
-BASE_DIR   = Path(__file__).parent
-PROFILE    = BASE_DIR / "browser_profile"
-OUTPUTS    = BASE_DIR / "outputs"
+BASE_DIR = Path(__file__).parent
+
+# ── DATA_DIR (same logic as app.py) ──────────────────────────────────────────
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(BASE_DIR)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+PROFILE  = DATA_DIR / "browser_profile"
+OUTPUTS  = DATA_DIR / "outputs"
 OUTPUTS.mkdir(exist_ok=True)
 PROFILE.mkdir(exist_ok=True)
 
 # Force headless on Linux with no display (Railway/Docker), or if HEADLESS=true is set
 _on_linux_no_display = (platform.system() == "Linux" and not os.environ.get("DISPLAY"))
 HEADLESS = _on_linux_no_display or os.environ.get("HEADLESS", "false").lower() == "true"
+
+# ── Optional proxy (residential proxy or Browserbase helps bypass Cloudflare) ─
+# Set PROXY_URL=http://user:pass@host:port  (or socks5://...)
+PROXY_URL = os.environ.get("PROXY_URL", "")
+
+# Realistic Chrome UA — updated periodically to match a current stable release
+_CHROME_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 
 # ── shared status dict (read by Flask for live polling) ─────────────────────
 status = {
@@ -91,11 +107,14 @@ def _stamp_bar(screenshot_bytes, chain, token, explorer_name, url, timestamp):
         # subtle top border line
         draw.line([0, img.height, img.width, img.height], fill=(30, 50, 80), width=1)
 
-        # try Windows fonts, fall back to PIL default
+        # try Windows fonts first, then Linux/Docker system fonts, fall back to PIL default
         font_paths = [
             "C:/Windows/Fonts/consola.ttf",
             "C:/Windows/Fonts/cour.ttf",
             "C:/Windows/Fonts/arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeMono.ttf",
         ]
         font = None
         for fp in font_paths:
@@ -131,6 +150,15 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
     """Open every explorer URL in parallel, wait, screenshot all at once."""
     from playwright.async_api import async_playwright
 
+    # playwright-stealth patches navigator.webdriver, plugins, languages,
+    # canvas fingerprint, WebGL, chrome runtime object, and ~25 other signals
+    # that Cloudflare and bot-detection services check.
+    try:
+        from playwright_stealth import stealth_async
+        _stealth_available = True
+    except ImportError:
+        _stealth_available = False
+
     tasks = []
     for w in wallets:
         addr = w.get("address", "")
@@ -146,23 +174,42 @@ async def _capture(wallets, cb, wait_secs=12, max_height=3000):
     results = []
 
     async with async_playwright() as p:
+        # Build proxy config if env var is set
+        proxy_cfg = {"server": PROXY_URL} if PROXY_URL else None
+
         ctx = await p.chromium.launch_persistent_context(
             user_data_dir=str(PROFILE),
             headless=HEADLESS,
             viewport={"width": 1440, "height": 820},
+            user_agent=_CHROME_UA,
+            proxy=proxy_cfg,
+            # Remove "--enable-automation" from Playwright's default args —
+            # this flag is one of the primary signals Cloudflare looks for.
+            ignore_default_args=["--enable-automation"],
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-infobars",
+                "--no-first-run",
+                "--no-default-browser-check",
                 "--no-sandbox",                  # required on Linux servers
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",       # prevents crashes in Docker
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
             ],
+            # Pass typical browser headers so requests look organic
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+            },
         )
 
-        # open one page per task
+        # open one page per task and apply stealth patches before any navigation
         pages = []
         for t in tasks:
             pg = await ctx.new_page()
+            if _stealth_available:
+                await stealth_async(pg)
             pages.append((pg, t))
 
         # navigate ALL simultaneously

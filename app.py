@@ -17,11 +17,19 @@ from apscheduler.triggers.cron import CronTrigger
 
 import snapshot_engine as engine
 
-app      = Flask(__name__)
-BASE     = Path(__file__).parent
-WALLETS  = BASE / "wallets.json"
-SETTINGS = BASE / "settings.json"
-OUTPUTS  = BASE / "outputs"
+app  = Flask(__name__)
+BASE = Path(__file__).parent
+
+# ── DATA_DIR ──────────────────────────────────────────────────────────────────
+# Locally defaults to the repo root (no behaviour change).
+# On Railway: set DATA_DIR=/data and attach a persistent Volume at /data so
+# wallets, settings, and snapshots all survive container restarts/redeploys.
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(BASE)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+WALLETS  = DATA_DIR / "wallets.json"
+SETTINGS = DATA_DIR / "settings.json"
+OUTPUTS  = DATA_DIR / "outputs"
 OUTPUTS.mkdir(exist_ok=True)
 
 scheduler = BackgroundScheduler(timezone="UTC")
